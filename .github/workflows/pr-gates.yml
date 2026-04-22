@@ -31,7 +31,7 @@ jobs:
       - name: Fail on forbidden lint token
         run: |
           set -euo pipefail
-          if rg -n "FORBIDDEN_LINT_TOKEN" --glob '!**/.github/workflows/**' .; then
+          if grep -R -n --exclude-dir=.git --exclude-dir=.github "FORBIDDEN_LINT_TOKEN" .; then
             echo "Forbidden lint token detected"
             exit 1
           fi
