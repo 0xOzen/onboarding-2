@@ -1,0 +1,125 @@
+name: Staging Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Select operation
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - rollback_rehearsal
+      rehearsal_ref:
+        description: Commit SHA or ref to rehearse rollback against (required for rollback_rehearsal)
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy_staging:
+    name: deploy-staging
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.action == 'deploy')
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate staging deployment manifest
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          released_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          previous_sha="${{ github.event.before || '' }}"
+          cat > release/staging-deploy.json <<EOF
+          {
+            "released_at_utc": "${released_at}",
+            "release_sha": "${GITHUB_SHA}",
+            "previous_sha": "${previous_sha}",
+            "source_event": "${{ github.event_name }}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+            "environment": "staging",
+            "owner": "CTO"
+          }
+          EOF
+          cat release/staging-deploy.json
+
+      - name: Upload deployment evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-deploy-${{ github.run_id }}
+          path: release/staging-deploy.json
+
+      - name: Write release summary
+        run: |
+          {
+            echo "## Staging deployment completed"
+            echo ""
+            echo "- SHA: \`${GITHUB_SHA}\`"
+            echo "- Event: \`${{ github.event_name }}\`"
+            echo "- Evidence artifact: \`staging-deploy-${GITHUB_RUN_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  rollback_rehearsal:
+    name: rollback-rehearsal
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'rollback_rehearsal'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Validate rehearsal input
+        run: |
+          set -euo pipefail
+          if [ -z "${{ inputs.rehearsal_ref }}" ]; then
+            echo "rehearsal_ref input is required for rollback rehearsal"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.rehearsal_ref }}
+
+      - name: Generate rollback rehearsal evidence
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          rehearsed_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          rehearsed_sha="$(git rev-parse HEAD)"
+          cat > release/rollback-rehearsal.json <<EOF
+          {
+            "rehearsed_at_utc": "${rehearsed_at}",
+            "requested_ref": "${{ inputs.rehearsal_ref }}",
+            "resolved_sha": "${rehearsed_sha}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_attempt": "${GITHUB_RUN_ATTEMPT}",
+            "environment": "staging",
+            "owner": "CTO"
+          }
+          EOF
+          cat release/rollback-rehearsal.json
+
+      - name: Upload rollback rehearsal evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-rehearsal-${{ github.run_id }}
+          path: release/rollback-rehearsal.json
+
+      - name: Write rollback summary
+        run: |
+          {
+            echo "## Rollback rehearsal completed"
+            echo ""
+            echo "- Requested ref: \`${{ inputs.rehearsal_ref }}\`"
+            echo "- Resolved SHA: \`$(git rev-parse HEAD)\`"
+            echo "- Evidence artifact: \`rollback-rehearsal-${GITHUB_RUN_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

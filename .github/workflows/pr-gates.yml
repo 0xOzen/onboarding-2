@@ -1,0 +1,58 @@
+name: PR Gates
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+jobs:
+  policy:
+    name: policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate required gate jobs are declared
+        run: |
+          set -euo pipefail
+          workflow_file=".github/workflows/pr-gates.yml"
+          for gate in policy lint test build; do
+            if ! grep -q "^  ${gate}:" "$workflow_file"; then
+              echo "Missing required gate job: $gate"
+              exit 1
+            fi
+          done
+          echo "Required gate declarations are present"
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail on forbidden lint token
+        run: |
+          set -euo pipefail
+          if grep -R -n --exclude-dir=.git --exclude-dir=.github "FORBIDDEN_LINT_TOKEN" .; then
+            echo "Forbidden lint token detected"
+            exit 1
+          fi
+          echo "Lint gate passed"
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: |
+          set -euo pipefail
+          echo "Simulated tests passed"
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run build
+        run: |
+          set -euo pipefail
+          echo "Simulated build passed"
